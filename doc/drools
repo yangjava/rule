@@ -1,0 +1,892 @@
+最近项目需要增加风控系统，在经过一番调研以后决定使用Drools规则引擎。因为项目是基于SpringCloud的架构，所以此次学习使用了SpringBoot2.0版本结合Drools7.14.0.Final版本。
+
+引入依赖
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+<dependency>
+    <groupId>org.drools</groupId>
+    <artifactId>drools-core</artifactId>
+    <version>7.14.0.Final</version>
+</dependency>
+<dependency>
+    <groupId>org.kie</groupId>
+    <artifactId>kie-spring</artifactId>
+    <version>7.14.0.Final</version>
+</dependency>
+创建配置类
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+@Configuration
+public class DroolsAutoConfiguration {
+    private static final String RULES_PATH = "rules/";
+
+    @Bean
+    @ConditionalOnMissingBean(KieFileSystem.class)
+    public KieFileSystem kieFileSystem() throws IOException {
+        KieFileSystem kieFileSystem = getKieServices().newKieFileSystem();
+        for (Resource file : getRuleFiles()) {
+            kieFileSystem.write(ResourceFactory.newClassPathResource(RULES_PATH + file.getFilename(), "UTF-8"));
+        }
+        return kieFileSystem;
+    }
+
+    private Resource[] getRuleFiles() throws IOException {
+        ResourcePatternResolver resourcePatternResolver = new PathMatchingResourcePatternResolver();
+        return resourcePatternResolver.getResources("classpath*:" + RULES_PATH + "**/*.*");
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(KieContainer.class)
+    public KieContainer kieContainer() throws IOException {
+        final KieRepository kieRepository = getKieServices().getRepository();
+        kieRepository.addKieModule(new KieModule() {
+            public ReleaseId getReleaseId() {
+                return kieRepository.getDefaultReleaseId();
+            }
+        });
+        KieBuilder kieBuilder = getKieServices().newKieBuilder(kieFileSystem());
+        kieBuilder.buildAll();
+        return getKieServices().newKieContainer(kieRepository.getDefaultReleaseId());
+    }
+
+
+    @Bean
+    @ConditionalOnMissingBean(KieBase.class)
+    public KieBase kieBase() throws IOException {
+        return kieContainer().getKieBase();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(KieSession.class)
+    public KieSession kieSession() throws IOException {
+        KieSession kieSession = kieContainer().newKieSession();
+        return kieSession;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(KModuleBeanFactoryPostProcessor.class)
+    public KModuleBeanFactoryPostProcessor kiePostProcessor() {
+        return new KModuleBeanFactoryPostProcessor();
+    }
+    public KieServices getKieServices() {
+        System.setProperty("drools.dateformat","yyyy-MM-dd");
+        return KieServices.Factory.get();
+    }
+}
+在这个时候我们的基本环境已经搭建好了，接下来我们一起来学习Drools吧
+
+HelloWord
+程序员的世界里，我们学习任何一门语言都是以HelloWord开启的，本次学习也不例外。
+
+1.创建规则文件
+Drools的规则文件是以*.drl结尾的文件，我们来看一个最简单的规则文件中都是包含什么。
+
+通常来说，我们会把规则文件放在resources资源文件夹下，这里呢我们在resources文件夹下新建一个rules文件夹，然后再新建一个HelloWord.drl文件
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+package rules;
+import cn.org.zhixiang.entity.User;
+import java.lang.String;
+import java.util.List;
+
+rule "hello,word"
+    when
+        eval(true)
+    then
+        System.err.println("hello,word!");
+end
+规则文件，就是我们新建的这个HelloWord.drl可以理解为一个Java类
+package，这个跟Java中的包名是差不多的
+import，此文件中需要的类。
+rule，可以理解为给这个规则起的一个名字，一个规则文件中可以包含多个rule。
+when，when下面可以放置一些条件判断的表达式以及定义一些变量什么的。如果里面内容为空的话则会默认添加一个eval(true)代表一个为true的表达式
+then，当when下面的表达式为true是then下方的代码才会执行，在这里可以直接编写Java代码（代码所需要的类通过import引入），当然也可以使用when模块定义的一些变量
+end 代表规则hello,word的结束。
+2.Java调用
+现在我们的规则文件写好以后就可以在Java中来进行调用了。
+
+1. 新建一个测试类DroolsApplicationHelloWordTests
+1
+2
+3
+4
+5
+6
+7
+8
+@RunWith(SpringRunner.class)
+@SpringBootTest
+public class DroolsApplicationHelloWordTests {
+
+    @Autowired
+    KieSession kieSession;
+
+}
+上方注入的kieSession对象就是以后与Drools打交道最常用的一个对象了，通过它可以直接操作在配置类kieFileSystem方法中加载的所有的规则文件
+
+2. 编写测试代码
+1
+2
+3
+4
+@Test
+public void testHelloWord() {
+    kieSession.fireAllRules();
+}
+kieSession.fireAllRules方法是执行所有的规则，在运行了这个测试方法之后我们应该就可以看到控制台打印的一句hello,word!了
+
+基础学习
+1. 向规则文件传参
+1. 在entity包下新增一个User的实体类
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+public class User {
+    private String name;
+    private int age;
+
+    public User(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+    //省略getter，setter
+}
+2. 在hello,word规则下方再次新建一个规则user
+1
+2
+3
+4
+5
+6
+7
+rule "user"
+    when
+      $u:User(name=="张三",age==18)
+    then
+        $u.setName("李四");
+        System.err.println("hello,word："+$u.getName());
+end
+$u:User(name==“张三”,age==18)的意思就是当存在一个user对象，并且它的name属性等于张三age等于18时就把这个对象赋值给$u。
+
+在下方的then模块，如果上方的条件成立时就把$u的name属性更新一下，然后打印。
+
+3. 编写测试代码
+1
+2
+3
+4
+5
+6
+7
+@Test
+public void testUser() {
+    User user=new User("张三",18);
+    kieSession.insert(user);
+    kieSession.fireAllRules();
+    System.err.println("规则执行完毕后张三变为了："+user.getName());
+}
+我们可以使用kieSession.insert方法向规则文件中传参，然后在调用方法后你会发现在规则文件中更改的值在Java代码中也被更改了。
+
+4. 存在的小问题
+可能你会发现上方代码执行的时候连那句helloword也打印了，为什么呢，这是因为HelloWord那条规则没有验证条件再加上kieSession.fireAllRules()本来就是执行所有被加载的规则的。那么避免这种情况的办法就是执定本次执行的规则
+
+1
+2
+3
+4
+5
+6
+@Test
+    public void testOneRule() {
+        User user=new User("张三",18);
+        kieSession.insert(user);
+        kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("user"));
+    }
+上方的user就是指定的本次执行的规则名称了。
+
+5.扩展操作
+上方我们通过RuleNameEndsWithAgendaFilter对象成功指定了需要执行的规则文件，其实通过查看此对象的源码我们发现这个对象是AgendaFilter的一个实现类，决定执不执行一个规则的条件是accept方法返回的boolean值决定的。
+所以说如果我们希望可以一次批量匹配多个规则的话可以通过继承AgendaFilter重写accept方法哦
+
+2. 常用运算符
+1. 连接符
+Drools中存在的三种连接符，上方的代码中我们已经使用过一个了，那就$u:User(name==“张三”,age==18)中的逗号，这里的逗号其实就是and的意思。另外的两个运算符就是&&和||，相信它们两个的意思不用我来介绍了吧。
+
+不过有一点需要注意的是&&和|| 和逗号,不能同时出现。要不你选择用&&和||要不就只用逗号， 。
+
+2. 类型比较操作符
+1.首先就是<,>,==,!=,>=,<=这六个
+它们是配合eval使用的，比如上方我们使用的eval（true）就是直接返回的true。当我们比较常量时可以使用eval（u.age>b.age）
+
+2. contains not contains
+contains用于判断对象的某个字段是否包含另外一个对象
+
+1
+2
+3
+4
+5
+6
+7
+rule "contains"
+    when
+      $s:String()
+      $u:User(name contains $s)
+    then
+        System.err.println("用户张三存在");
+end
+1
+2
+3
+4
+5
+6
+7
+8
+@Test
+    public void testContains() {
+       String name="张三";
+        User user=new User("张三",18);
+        kieSession.insert(name);
+        kieSession.insert(user);
+        kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("contains"));
+    }
+not contains顾明思议就是不包含
+
+3. memberOf not memberOf
+memberOf用于判断对象的某个字段是否存在一个集合中
+
+1
+2
+3
+4
+5
+6
+7
+rule "memberOf"
+    when
+      $list:List()
+      $u:User(name memberOf $list)
+    then
+        System.err.println("用户李四存在");
+end
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+@Test
+    public void testMemberOf() {
+        List list=new ArrayList();
+        list.add("张三");
+        list.add("李四");
+        User user=new User("李四",18);
+        kieSession.insert(list);
+        kieSession.insert(user);
+        kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("memberOf"));
+    }
+not memberOf顾明思议就是不存在
+
+3. matches not matches
+matches就是用于匹配正则表达式的了
+
+1
+2
+3
+4
+5
+6
+rule "matches"
+    when
+      $u:User(name matches "张.*")
+    then
+        System.err.println("用户张xx存在");
+end
+1
+2
+3
+4
+5
+6
+@Test
+   public void testMatches() {
+       User user=new User("张三",18);
+       kieSession.insert(user);
+       kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("matches"));
+   }
+not matches不用我说了吧
+
+本篇博客主要讲解Drools常用的属性以及函数
+
+属性
+首先我们在resources\rules文件夹下创建一个Property.drl，还有一个DroolsApplicationPropertyTests
+
+1. salience优先级
+salience 属性的值默认为0，它的值越大执行的优先级就越高,看如下代码在执行的时候就会先执行salience2
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+ rule "salience2"
+salience 2
+    when
+        eval(true)
+    then
+        System.err.println("salience2");
+end
+
+rule "salience1"
+salience 1
+    when
+        eval(true)
+    then
+        System.err.println("salience1");
+end
+1
+2
+3
+4
+@Test
+   public void testSalience() {
+       kieSession.fireAllRules();
+   }
+2. date-effective日期比较（小于等于）
+当系统时间小于等于date-effective的值是才会执行。
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+ rule "dateEffective"
+date-effective "2018-11-24"
+    when
+    then
+        System.err.println("2018-11-24被执行");
+end
+
+rule "dateEffectiveTomorrow"
+date-effective "2018-11-25"
+    when
+    then
+        System.err.println("2018-11-25被执行");
+end
+1
+2
+3
+4
+5
+6
+7
+8
+9
+@Test
+public void testDateEffective() {
+    kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("dateEffective"));
+}
+
+@Test
+public void testDateEffectiveTomorrow() {
+    kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("dateEffectiveTomorrow"));
+}
+由于今天是11月24，所以上方的dateEffectiveTomorrow将不会执行。
+
+还有需要注意的是Drools默认的时间格式是dd-MMM-yyyy的，也就是说你必须使用24-十一月-2018它才能识别，我为什么能使用yyyy-MM-dd呢，请参考上篇文章中进行自动配置时的getKieServices()方法
+
+3. date-expires日期比较（大于）
+刚好于date–effective相反
+
+4. enabled
+当一个规则的enabled属性变为false时这条规则将不再可用
+
+1
+2
+3
+4
+5
+6
+rule "enabled"
+enabled false
+    when
+    then
+        System.err.println("被禁用的规则");
+end
+1
+2
+3
+4
+@Test
+    public void testEnabled() {
+        kieSession.fireAllRules(new RuleNameEndsWithAgendaFilter("enabled"));
+    }
+函数
+接着我们在resources\rules文件夹下创建一个Function.drl，还有一个DroolsApplicationFunctionTests
+
+Drools中常用函数分别为insert、update和retract，分别是插入更新和删除，我们来看一下下方的几个规则的执行过程
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+rule "test1"
+    when
+
+    then
+      insert(new User("赵六",12));
+      System.err.println("创造赵六");
+end
+
+rule "test2"
+    when
+       $u:User(name=="赵六")
+    then
+        $u.setName("王五");
+        update($u);
+        System.err.println("赵六");
+end
+
+rule "test3"
+    when
+         $u:User(name=="王五")
+    then
+        System.err.println("王五");
+        retract($u);
+end
+
+rule "test4"
+    when
+         $u:User(name=="王五")
+    then
+        System.err.println("王五删除删除之后"+$u.getName());
+end
+可用看的，test1规则没有判断条件，所以直接被执行，执行过程中它生成了一个对象插入到工作内存中，此对象的规则又恰好与test2规则匹配，所以紧接着test2执行，test2执行时更新了user对象，更新后的对象又匹配了test3，所以test3继续执行。执行完毕后user对象被删除，test4就执行不了了。
+
+另外还有几个方法也是常用的：
+
+getWorkingMemory,获取当前的WorkingMemory对象
+halt，执行完当前规则后不再执行其他规则
+getRule，获取当前规则对象
+
+其实本来我也是打算使用Tomcat来部署Workbench的，但是在网上看了几篇文章，超级繁琐的配置、各种版本。实在看不下去了索性就直接使用Docker来部署了。本次部署的版本是最新稳定版，对应drools的7.14.0.Final版本。
+
+1. 拉取镜像
+1
+docker pull jboss/drools-workbench-showcase:latest
+镜像文件比较大，870多M，可能需要一些时间，不要着急。
+
+2. 配置
+镜像拉取完毕后首先通过以下命令启动
+
+1
+docker run  -p 8080:8080 -p 8001:8001 -d --name drools-workbench jboss/drools-workbench-showcase:latest
+进入容器
+
+1
+docker exec -it 容器id /bin/bash
+Workbench的日志存在/opt/jboss/wildfly/standalone/log/目录
+
+我们现在要做的是进入/opt/jboss/wildfly/standalone/configuration目录，打开standalone-full-drools.xml文件新增一条配置
+
+1
+<property name="org.uberfire.nio.git.dir" value="/opt/jboss/wildfly/mygit"/>
+1
+
+然后退出容器之后重启一下容器
+
+1
+docker restart 容器id
+紧接着你就可以去浏览器访问了：ip:8080/drools-wb
+
+3. 构建规则文件
+使用默认用户名密码admin登陆系统，在欢迎页选择新建一个projects
+2
+按照如下操作创建一个项目
+3
+接着呢，进入drools-test项目，点击屏幕右方的Add Asset按钮。我在这里为大家演示一下下方的三个如何操作，剩下就要靠你自己去探索了。
+4
+
+软件包，这个是跟Java中的package一样的，上方input是包名，下方是上级包名，我在这里创建一个一个包entity，全路径是cn.org.zhixiang.entity
+5
+
+数据对象，这个数据对象其实就是Java中的实体类了，我们这里创建一个名为Dog的对象，然后进入这个数据对象就会发现有一个添加字段的按钮可以供我们添加各种字段，然后左侧的源代码可以让我们直观的感受到创建之后的对象到底为何物。我在这里为Dog添加了name和age属性
+
+向导型规则模板，这个就是我们的规则对象，创建一个规则对象hello，进入hello之后有一个事是必须注意的，我们想引用刚才创建的Dog对象，得先去数据对象标签页新建一个条目，选择类型是cn.org.zhixiang.entity.Dog.然后在会的model标签页，如果你看了前两篇文章的话我想你一定知道该如何操作。我在这里是这样操作的：
+6
+其实源码就跟我第一篇文章写的HelloWord差不多
+7
+
+接下来就可以构建了
+回到这个项目的主页，单击build按钮，然后再单击Deploy按钮，这个jar包就被发布到了WorkBench的maven仓库里，我们可以通过访问如下地址来得到这个jar包
+
+1
+ip:8080/drools-wb/maven2/cn/org/zhixiang/drools-test/0.0.1/drools-test-0.0.1.jar
+4. Java获取规则文件
+规则文件既然已经发布了，那么接下来就是Java出场的时候了。
+
+创建一个实体Dog，这里注意的是包名、类名还有属性都要与上方在Workbench创建的保持一致。
+创建DroolsApplicationWorkBenchTests测试类
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+@RunWith(SpringRunner.class)
+public class DroolsApplicationWorkBenchTests {
+    @Test
+    public void testWorkbench() {
+        String url = "http://ip:8080/drools-wb/maven2/cn/org/zhixiang/drools-test/0.0.1/drools-test-0.0.1.jar";
+        KieServices kieServices = KieServices.Factory.get();
+        KieRepository kieRepository = kieServices.getRepository();
+        UrlResource resource = (UrlResource) kieServices.getResources().newUrlResource(url);
+        resource.setBasicAuthentication("enabled");
+        resource.setPassword("admin");
+        resource.setUsername("admin");
+        InputStream is = null;
+        try {
+            is = resource.getInputStream();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        KieModule kieModule = kieRepository.addKieModule(kieServices.getResources().newInputStreamResource(is));
+        KieContainer kieContainer = kieServices.newKieContainer(kieModule.getReleaseId());
+        KieSession kieSession = kieContainer.newKieSession();
+        Dog dog = new Dog();
+        dog.setName("大黄");
+        kieSession.insert(dog);
+        kieSession.fireAllRules();
+    }
+}
+执行完测试方法以后你的控制台打印出了大黄出场四个字么？
+
+
+1.drools是什么
+Drools是为Java量身定制的基于Charles  Forgy的RETE算法的规则引擎的实现。具有了OO接口的RETE,使得商业规则有了更自然的表达。
+
+Rule是什么呢？
+
+
+
+一条规则是对商业知识的编码。一条规则有 attributes ，一个 Left Hand Side （ LHS ）和一个 Right Hand Side （ RHS ）。Drools 允许下列几种 attributes ： salience ， agenda-group ， no-loop ， auto-focus ， duration ， activation-group  。
+
+规则的 LHS 由一个或多个条件（ Conditions ）组成。当所有的条件（ Conditions ）都满足并为真时， RHS 将被执行。 RHS 被称为结果（ Consequence ）。 LHS 和 RHS 类似于
+
+if（<LHS>){
+
+<RHS>
+
+}
+
+下面介绍几个术语：
+
+对新的数据和被修改的数据进行规则的匹配称为模式匹配（ Pattern Matching ）。进行匹配的引擎称为推理机（ Inference Engine ）。被访问的规则称为 ProductionMemory ，被推理机进行匹配的数据称为 WorkingMemory 。 Agenda 管理被匹配规则的执行。推理机所采用的模式匹配算法有下列几种： Linear ， RETE ， Treat ， Leaps 。这里注意加红的地方，对数据的修改也会触发重新匹配，即对 WorkingMemory中的数据进行了修改。
+
+然后规则引擎大概是这个样子的：
+
+
+
+这个图也很好理解，就是推理机拿到数据和规则后，进行匹配，然后把匹配的规则和数据传递给Agenda。
+
+规则引擎实现了数据同逻辑的完全解耦。规则并不能被直接调用，因为它们不是方法或函数，规则的激发是对 WorkingMemory 中数据变化的响应。结果（ Consequence ，即 RHS ）作为 LHS events 完全匹配的 Listener 。
+
+数据被 assert 进 WorkingMemory 后，和 RuleBase 中的 rule 进行匹配（确切的说应该是 rule 的 LHS ），如果匹配成功这条 rule 连同和它匹配的数据（此时就叫做 Activation ）一起被放入 Agenda ，等待 Agenda 来负责安排激发 Activation （其实就是执行 rule 的 RHS ），上图中的菱形部分就是在 Agenda 中来执行的， Agenda 就会根据冲突解决策略来安排 Activation 的执行顺序。
+
+下面附上drools规则引擎的执行过程
+
+
+
+
+
+2.rete算法
+参考链接：Rete Algorithm
+
+rete在拉丁文里是net network的意思，这个算法由 Charles Forgy  博士在他的博士论文里提到。
+
+这个算法可以分为两个部分，一个是如何编译规则，一个是如何执行。原话（The Rete algorithm can be broken into 2 parts: rule compilation and runtime execution.）
+
+rule compilation 就是如何通过对所有规则进行处理，生成一个有效的辨别网络。而一个辨别网络，则对数据进行过滤，使数据一步步往下传送。数据刚进入网络，有很多的匹配条件，这里可以理解为：逻辑表达式为true or false，然后在网络里往下传递的时候，匹配的条件越来越少，最后到达一个终止节点。
+
+在这个论文里Dr Charles描述了这么几个节点，Node:
+
+2.rete算法
+参考链接：Rete Algorithm
+
+rete在拉丁文里是net network的意思，这个算法由 Charles Forgy  博士在他的博士论文里提到。
+
+这个算法可以分为两个部分，一个是如何编译规则，一个是如何执行。原话（The Rete algorithm can be broken into 2 parts: rule compilation and runtime execution.）
+
+rule compilation 就是如何通过对所有规则进行处理，生成一个有效的辨别网络。而一个辨别网络，则对数据进行过滤，使数据一步步往下传送。数据刚进入网络，有很多的匹配条件，这里可以理解为：逻辑表达式为true or false，然后在网络里往下传递的时候，匹配的条件越来越少，最后到达一个终止节点。
+
+在这个论文里Dr Charles描述了这么几个节点，Node:
+
+
+
+
+
+这里对其中的几个节点做一下简单介绍，另外说一下如何运作的。
+
+首先，root node是所有的对象都可以进入的节点，也是辨别网络的一个入口，这个可以理解为一个虚节点，其实可能并不存在。
+然后立马进入到ObjectTypeNode节点，这是一个对象类型节点。很明显，这里承载的是一个对象，可以理解为是java中的某个new Object()，在这个算法里，这个节点的作用就是为了保证不做一些无用功，什么无用功呢，就是不是对每个规则，进入的对象都要去辨别一遍，而是确定的对象类型，去做跟他相关的辨别，其实就是match。那么怎么做到呢？这里用到了一个hashMap，每次进入网络的对象，都会在这个map中通过hash，找到一个对应的辨别路径去辨别，即match。附上英文原文：（
+Drools extends Rete by optimizing the propagation from ObjectTypeNode to AlphaNode using hashing. Each time an AlphaNode is added to an ObjectTypeNode it adds the literal value as a key to the HashMap with the AlphaNode as the value. When a new instance enters the ObjectType node, rather than propagating to each AlphaNode, it can instead retrieve the correct AlphaNode from the HashMap,thereby avoiding unnecessary literal checks.）
+
+
+一个图来说明：
+
+
+所有经过ObjectTypeNode的对象都会走到下一个节点，下一个节点可以是下面的几种：AlphaNodes, LeftInputAdapterNodes and BetaNodes。后面两个节点是AlphaNodes节点的一些变种，AlphaNodes节点是用来判断一些条件的。可以理解为一些逻辑表达式的计算。
+
+下面开始上图：
+
+
+
+这个图就是传递进一个Cheese对象，然后依次判断是否满足条件：1.判断name是否是“cheddar”，2.如果判断1通过了，继续判断strength是否是strong。这是最简单了一种情况了，这里附上对应的规则描述，后面会继续讲解：
+rule "cheessRule" when
+$cheese:Cheese(name == "cheddar" && strength == "strong")
+then
+......
+end
+
+3.maven依赖
+这里列了一些后面的一些例子需要用到的maven依赖
+
+<!--kie api 构建kie虚拟文件系统，关联decisiontable和drl文件，很关键 -->
+<dependency>
+    <groupId>org.kie</groupId>
+    <artifactId>kie-api</artifactId>
+</dependency>
+<!-- 规则引擎核心包，里面包含了RETE引擎和LEAPS 引擎-->
+<dependency>
+    <groupId>org.drools</groupId>
+    <artifactId>drools-core</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.drools</groupId>
+    <artifactId>drools-compiler</artifactId>
+</dependency>
+<!-- 决策表依赖-->
+<dependency>
+    <groupId>org.drools</groupId>
+    <artifactId>drools-decisiontables</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.drools</groupId>
+    <artifactId>drools-templates</artifactId>
+</dependency>
+4.规则文件：.drl or xls
+我们一般用到的也就这两种形式，一个是drl文件，是drools规则引擎提供的最原生的方式，语法很简单，具体语法见
+
+还有一个是决策表，决策表可以是xls也可以是csv，我们一般用xls比较多。而且好理解。xls就是一个excel文件。ps：在使用的过程中，遇到很多坑，其中一个最大的坑是mac系统的问题，这里后面会安利。
+
+drl文件
+首先来看下drl文件，这个在第2条讲解node的时候已经提到过了。
+举例：
+
+
+
+rule "ageUp12" when
+ $student: Student(age > 2)
+    then
+ $student.ageUp12();
+    end
+
+rule "nameMax" when
+ $student: Student(name == "max")
+    then
+ $student.nameMax();
+    retract($student);
+    end
+简单说明：以第一个rule为例
+package 定义了规则文件的一个命名空间，和java中的package无关。
+import 这里可以有多个，就是在规则文件里引用到的java类。
+rule 用来定义一个规则，这里名字不可重复，后面跟一个when关键字，翻译过来就是，规则 名ageUp12，当满足......
+when 和then之间是逻辑表达式，也就是辨别条件，其中$student:Student(age >2)这里其实包含了两个意思，一个是满足age>2的Student对象，一个是把这个对象赋值给$student变量，这样后面就可以引用这个变量了。逻辑表达式写在小括号里，如果是多个条件，可以用逗号分隔，如$sutdent :Student(age > 2,name=="max")
+then和end之间来定义action，即当满足age>2的时候，做什么操作，这里可以像在java方法里一样，调用任何一个java类的方法，只要import了这个类且在前面定义了这个变量
+第二个例子可以看到有个retract($student),这里是用到了drools内部提供的一个函数，具体见后续关于drools语法介绍的博客
+
+
+决策表（decisiontable）
+决策表就是一个excel文件，可以是xls(xlsx暂不支持)或者csv是个表格，看上去也很直观，即便是不懂代码的人看了也能看懂，不像drl文件那么多语法。关键的一点是：decisiontable也是最终转成drl文件来让drools规则引擎来解析执行的。*.xls到*.drl的转换这个在后面的wiki会说到。
+
+直接上图吧
+
+
+
+这里可以暂时忽略那些背景色，只是为了好区分没个模块的作用
+
+这里忽略文件开始的空行，从有数据的第一行开始解释说明：
+
+第一行,第一列：RuleSet 第二列。这里RuleSet可以省略的，累似drl文件中的package
+
+第二行，第一列：Import 第二列具体的java类，这里和drl文件里的Improt相对应，多个引用类用逗号分隔
+
+第三行，是个对这个决策表的说明
+
+第四行，第一列：RuleTable FirstDecisionTable 这一行很关键 指明这是一个决策表，并且下面的几行都是具体的规则，就好比上面几行是一些准备条件，下面才是真正干活的地方，这里来个说明
+
+第五行，CONDITION行，这一行可以有两种列名：CONDITION ACTION。CONDITION列就是drl里的辨别条件，  ACTION则是具体的操作，即满足前面几列的CONDITION的条件后，会执行什么操作，这里CONDITION一定在ACTION前面，ACTION可以有多个列， 单个ACTION里的多个操作用逗号分隔，末尾要加分号结尾这里很重要，不然会有解析错误
+
+第六行，紧挨着CONDITION的一行，可以在这里声明下面要用的到对象，对应drl文件里的$student:Student()
+
+第七行，是辨别条件逻辑表达式，如：student.getAge()==$param则对应drl里的age==12这里$param是对应列每个单元格的值，然后这里需要特别说明下，针对于非字符串，如整数，小数等，可以直接使用$param，但是如果单元格里是字符串，则需要加双引号。（ps：mac里的双引号是斜的，一定要保证是竖着"的）另外，如果有多个值，可以用逗号隔开，然后可以用$1,$2提取变量值，如第一个ACTION里的student.doAction1($1,"$2")
+
+第八行仍然是注释行，可以添加每一个CONDITON ACTION列的说明。
+
+下面的每一行就是对应的某些条件的取值了。
+
+参考：decisionTable
+
+
+
+天才都是奋斗出来的，更何况你还不是天才，奋斗吧，少年

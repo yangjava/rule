@@ -1,0 +1,56 @@
+某些场景下Java系统里需要动态执行一段配置在数据库中（也可以是其他存储）的逻辑，仅仅基于Java是无法完成的，但可以通过集成Groovy来实现这个效果，尝试过程如下：
+
+1）在数据库中配置脚本，表结构随意定义，例子如下：
+
+Java动态执行可配置的逻辑_第1张图片
+
+2）Java中动态调存在于数据库里的groovy脚本（存在上表中的script字段里）
+
+[java]  view plain copy
+File f = null;
+BufferedWriter bw = null;
+Connection con = null;
+try {
+    Class.forName("com.mysql.jdbc.Driver");
+    con = DriverManager.getConnection("jdbc:mysql://10.20.168.42:3306/cutemock","root","111111");
+    Statement stmt = con.createStatement();
+    ResultSet rs = stmt.executeQuery("SELECT script FROM mock where service='"+
+                                     serviceName+"' and method='"+methodName+"'");
+    if(rs.next()){
+        LOGGER.info("start run script:"+rs.getString("script"));
+
+
+        f = File.createTempFile("gse", ".groovy");
+        bw = new BufferedWriter(new FileWriter(f));
+        bw.write(rs.getString("script"));
+        bw.flush();
+        Binding binding = new Binding();
+        GroovyScriptEngine gse = new GroovyScriptEngine(f.getParentFile().getName());
+        Object result = gse.run(f.getName(), binding);
+        hsfResponse.setAppResponse(result);
+        return hsfResponse;
+    }
+} catch (Exception e) {
+    LOGGER.error("run groovy error", e);
+}finally{
+    try {
+        if(bw!=null){
+            bw.close();
+        }
+        if(f!=null){
+            f.delete();
+        }
+        if(con!=null){
+            con.close();
+        }
+    } catch (Exception e2) {
+        // TODO: handle exception
+    }
+}
+上面代码比较简单，关键在于两点：
+
+1）通过GroovyScriptEngine来执行groovy脚本
+
+2）从数据库里load出groovy代码，并放入临时文件里，使其成为一段可执行的.groovy文件
+
+Java动态执行可配置的逻辑
